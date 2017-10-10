@@ -1,8 +1,10 @@
-use ::tokio_io::codec::{Encoder, Decoder};
-use ::bytes::{BytesMut, BufMut};
-use ::proto::MqttPacket;
-use ::errors::{Error, ErrorKind};
+use tokio_io::codec::{Encoder, Decoder};
+use bytes::{BytesMut, BufMut};
+use proto::MqttPacket;
+use errors::{Error, ErrorKind};
 
+
+/// dummy struct implementing tokio codec traits, namely Encoder and Decoder
 pub struct MqttCodec;
 
 impl Encoder for MqttCodec {

@@ -1,43 +1,49 @@
-use ::tokio_io::{AsyncRead, AsyncWrite};
-use ::futures::{Poll, Async, AsyncSink, Sink, Future};
-use ::futures::sync::oneshot::Sender;
-use ::take::Take;
-use ::futures_mutex::FutMutex;
-use ::bincode;
+use tokio_io::{AsyncRead, AsyncWrite};
+use futures::{Poll, Async, AsyncSink, Sink, Future};
+use futures::sync::oneshot::Sender;
+use take::Take;
+use futures_mutex::FutMutex;
+use bincode;
 
-use ::persistence::Persistence;
-use ::proto::{MqttPacket, PacketType, QualityOfService, PacketId};
-use ::errors::{Error, Result, ErrorKind, ResultExt};
-use ::tokio::mqtt_loop::LoopData;
-use ::tokio::{
-    OneTimeKey,
-    PublishState,
-    ClientReturn,
-    RequestTuple
-};
+use persistence::Persistence;
+use proto::{MqttPacket, PacketType, QualityOfService, PacketId};
+use errors::{Error, Result, ErrorKind, ResultExt};
+use tokio::mqtt_loop::LoopData;
+use tokio::{OneTimeKey, PublishState, ClientReturn, RequestTuple};
 
 enum State {
     Processing(MqttPacket, Sender<Result<ClientReturn>>),
-    Done
+    Done,
 }
 
-pub struct PublishHandler<'p, P> where P: 'p + Persistence {
+pub struct PublishHandler<'p, P>
+where
+    P: 'p + Send + Persistence,
+{
     data_lock: FutMutex<LoopData<'p, P>>,
-    state: Option<State>
+    state: Option<State>,
 }
 
-impl<'p, P> PublishHandler<'p, P> where P: 'p + Persistence {
-    pub fn new((packet, client): RequestTuple, data_lock: FutMutex<LoopData<'p, P>>) ->
-        PublishHandler<'p, P> {
+impl<'p, P> PublishHandler<'p, P>
+where
+    P: 'p + Send + Persistence,
+{
+    pub fn new(
+        (packet, client): RequestTuple,
+        data_lock: FutMutex<LoopData<'p, P>>,
+    ) -> PublishHandler<'p, P> {
 
         PublishHandler {
             state: Some(State::Processing(packet, client)),
-            data_lock
+            data_lock,
         }
     }
 }
 
-impl<'p, P> Future for PublishHandler<'p, P> where P: 'p + Persistence {
+impl<'p, P> Future for PublishHandler<'p, P>
+where
+    P: 'p + Send + Persistence,
+{
     type Item = ();
     type Error = Error;
 
@@ -48,33 +54,39 @@ impl<'p, P> Future for PublishHandler<'p, P> where P: 'p + Persistence {
             Some(Processing(_, _)) => {
                 let mut data = match self.data_lock.poll_lock() {
                     Async::Ready(g) => g,
-                    Async::NotReady => return Ok(Async::NotReady)
+                    Async::NotReady => return Ok(Async::NotReady),
                 };
 
                 let (packet, client) = match self.state.take() {
                     Some(Processing(packet, client)) => (packet, client),
-                    _ => unreachable!()
+                    _ => unreachable!(),
                 };
 
                 match packet.flags.qos() {
-                    QualityOfService::QoS0 => {},
-                    QualityOfService::QoS1 | QualityOfService::QoS2 => {
+                    QualityOfService::QoS0 => {}
+                    QualityOfService::QoS1 |
+                    QualityOfService::QoS2 => {
                         let id = packet.headers.get::<PacketId>().unwrap();
 
                         let ser = bincode::serialize(&packet, bincode::Infinite).unwrap();
                         let key = match data.persistence.append(ser) {
                             Ok(k) => k,
-                            Err(e) => return Err(e).chain_err(|| ErrorKind::PersistenceError)
+                            Err(e) => return Err(e).chain_err(|| ErrorKind::PersistenceError),
                         };
-                        data.client_publish_state.insert(*id,
-                            PublishState::Sent(key, Some(client)));
+                        data.client_publish_state.insert(
+                            *id,
+                            PublishState::Sent(
+                                key,
+                                Some(client),
+                            ),
+                        );
                     }
                 }
                 self.state = Some(Done);
                 Ok(Async::Ready(()))
-            },
+            }
             Some(Done) => Ok(Async::NotReady),
-            None => unreachable!()
+            None => unreachable!(),
         }
     }
 }

@@ -1,9 +1,9 @@
 use std::ops::Deref;
 use std::fmt;
-use ::bytes::{Bytes, BytesMut, BigEndian, BufMut};
-use ::errors::{Error, ErrorKind};
-use ::linked_hash_map::LinkedHashMap;
-use ::errors::Result;
+use bytes::{Bytes, BytesMut, BigEndian, BufMut};
+use errors::{Error, ErrorKind};
+use linked_hash_map::LinkedHashMap;
+use errors::Result;
 
 static CRC_0_MESSAGE: &'static str = "0x00 Connection Accepted";
 static CRC_1_MESSAGE: &'static str = "0x01 Connection Refused, unacceptable protocol version";
@@ -13,7 +13,7 @@ static CRC_4_MESSAGE: &'static str = "0x04 Connection Refused, bad user name or 
 static CRC_5_MESSAGE: &'static str = "0x05 Connection Refused, not authorized";
 
 bitflags! {
-    #[derive(Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize, Default)]
     pub flags PacketFlags: u8 {
         const DUP  = 0b1000,
         const QOS2 = 0b0100,
@@ -50,7 +50,7 @@ impl PacketFlags {
 }
 
 bitflags! {
-    #[derive(Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize, Default)]
     pub flags ConnFlags: u8 {
         const USERNAME    = 0b10000000,
         const PASSWORD    = 0b01000000,
@@ -111,7 +111,7 @@ impl ConnRetCode {
     pub fn is_ok(&self) -> bool {
         match self {
             &ConnRetCode::Accepted => true,
-            _ => false
+            _ => false,
         }
     }
 
@@ -121,12 +121,12 @@ impl ConnRetCode {
 
     pub fn as_u8(&self) -> u8 {
         match *self {
-            ConnRetCode::Accepted          => 0,
-            ConnRetCode::BadProtoVersion   => 1,
-            ConnRetCode::ClientIdRejected  => 2,
+            ConnRetCode::Accepted => 0,
+            ConnRetCode::BadProtoVersion => 1,
+            ConnRetCode::ClientIdRejected => 2,
             ConnRetCode::ServerUnavailable => 3,
-            ConnRetCode::BadCredentials    => 4,
-            ConnRetCode::Unauthorized      => 5
+            ConnRetCode::BadCredentials => 4,
+            ConnRetCode::Unauthorized => 5,
         }
     }
 }
@@ -139,7 +139,7 @@ impl fmt::Display for ConnRetCode {
             &ConnRetCode::ClientIdRejected => write!(f, "{}", CRC_2_MESSAGE),
             &ConnRetCode::ServerUnavailable => write!(f, "{}", CRC_3_MESSAGE),
             &ConnRetCode::BadCredentials => write!(f, "{}", CRC_4_MESSAGE),
-            &ConnRetCode::Unauthorized => write!(f, "{}", CRC_5_MESSAGE)
+            &ConnRetCode::Unauthorized => write!(f, "{}", CRC_5_MESSAGE),
         }
     }
 }
@@ -155,7 +155,7 @@ enum_from_primitive! {
 impl ProtoLvl {
     pub fn as_u8(&self) -> u8 {
         match *self {
-            ProtoLvl::V3_1_1 => 4
+            ProtoLvl::V3_1_1 => 4,
         }
     }
 }
@@ -180,7 +180,7 @@ impl fmt::Display for QualityOfService {
         match self {
             &QualityOfService::QoS0 => write!(f, "QOS0"),
             &QualityOfService::QoS1 => write!(f, "QOS1"),
-            &QualityOfService::QoS2 => write!(f, "QOS2")
+            &QualityOfService::QoS2 => write!(f, "QOS2"),
         }
     }
 }
@@ -199,7 +199,7 @@ impl SubAckReturnCode {
     pub fn is_ok(&self) -> bool {
         match self {
             &SubAckReturnCode::Failure => false,
-            _ => true
+            _ => true,
         }
     }
 }
@@ -208,7 +208,7 @@ pub struct LWTMessage {
     pub topic: MqttString,
     pub qos: QualityOfService,
     pub retain: bool,
-    pub message: Bytes
+    pub message: Bytes,
 }
 
 impl LWTMessage {
@@ -217,7 +217,7 @@ impl LWTMessage {
             topic: t,
             qos: q,
             retain: r,
-            message: m
+            message: m,
         }
     }
 
@@ -287,7 +287,7 @@ pub type Credentials<T> = Option<(T, Option<T>)>;
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Subscription {
     pub topic: MqttString,
-    pub qos: QualityOfService
+    pub qos: QualityOfService,
 }
 
 impl Subscription {
@@ -309,7 +309,7 @@ pub enum Payload {
     SubAck(Vec<SubAckReturnCode>),
     Unsubscribe(Vec<MqttString>),
     Application(Vec<u8>),
-    None
+    None,
 }
 
 impl Payload {
@@ -329,12 +329,12 @@ impl Payload {
                         pass.encode(out);
                     }
                 }
-            },
+            }
             &Payload::Subscribe(ref subs) => {
                 for sub in subs {
                     sub.encode_all(out);
                 }
-            },
+            }
             &Payload::Unsubscribe(ref unsubs) => {
                 for unsub in unsubs {
                     unsub.encode(out);

@@ -1,4 +1,2 @@
 
-struct Connect {
-
-}
+struct Connect {}

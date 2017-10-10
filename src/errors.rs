@@ -1,4 +1,5 @@
 use std;
+use futures;
 
 error_chain! {
     links {
@@ -7,6 +8,7 @@ error_chain! {
 
     foreign_links {
         Io(std::io::Error);
+        Canceled(futures::sync::oneshot::Canceled);
     }
 
     errors {
@@ -46,6 +48,10 @@ error_chain! {
             description("Network connection to server ended unexpectedly")
         }
 
+        NotConnected {
+            description("Network connection to server ended unexpectedly")
+        }
+
         InvalidTopicFilter {
             description("Topic filter has invalid syntax")
         }
@@ -67,7 +73,7 @@ impl From<self::proto::ErrorKind> for Error {
 }
 
 pub mod proto {
-    use ::proto::{PacketType, ConnRetCode, QualityOfService};
+    use proto::{PacketType, ConnRetCode, QualityOfService};
     error_chain!{
         errors {
             ResponseTimeout(p: PacketType) {

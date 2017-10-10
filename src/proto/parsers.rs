@@ -1,5 +1,5 @@
-use ::nom::{IResult, ErrorKind, Needed, be_u16, rest};
-use ::enum_primitive::FromPrimitive;
+use nom::{IResult, ErrorKind, Needed, be_u16, rest};
+use enum_primitive::FromPrimitive;
 use super::types::*;
 use super::Headers;
 
@@ -33,10 +33,10 @@ fn decode_vle(input: &[u8]) -> IResult<&[u8], usize> {
 
             enc_byte_index += 1;
         } else {
-            return IResult::Incomplete(Needed::Unknown)
+            return IResult::Incomplete(Needed::Unknown);
         }
     }
-    let (_, remain) = input.split_at(enc_byte_index+1);
+    let (_, remain) = input.split_at(enc_byte_index + 1);
     IResult::Done(remain, value)
 }
 

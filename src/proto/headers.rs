@@ -1,11 +1,11 @@
 use std::ops::Deref;
 use std::str;
-use ::nom::{IResult, be_u16};
-use ::bytes::{Bytes, BytesMut, IntoBuf, Buf, BufMut, BigEndian};
-use ::enum_primitive::FromPrimitive;
+use nom::{IResult, be_u16};
+use bytes::{Bytes, BytesMut, IntoBuf, Buf, BufMut, BigEndian};
+use enum_primitive::FromPrimitive;
 use super::types::*;
 use super::Header;
-use ::errors::{Result, ErrorKind, ResultExt};
+use errors::{Result, ErrorKind, ResultExt};
 
 pub struct ConnectFlags(ConnFlags);
 
@@ -29,7 +29,8 @@ impl Header for ConnectFlags {
     }
 
     fn parse_header(raw: &Bytes) -> Result<ConnectFlags> {
-        ConnFlags::from_bits(raw.into_buf().get_u8()).map(|f| ConnectFlags(f))
+        ConnFlags::from_bits(raw.into_buf().get_u8())
+            .map(|f| ConnectFlags(f))
             .ok_or(ErrorKind::PacketDecodingError.into())
     }
 
@@ -61,7 +62,8 @@ impl Header for ConnectAckFlags {
     }
 
     fn parse_header(raw: &Bytes) -> Result<ConnectAckFlags> {
-        ConnAckFlags::from_bits(raw.into_buf().get_u8()).map(|f| ConnectAckFlags(f))
+        ConnAckFlags::from_bits(raw.into_buf().get_u8())
+            .map(|f| ConnectAckFlags(f))
             .ok_or(ErrorKind::PacketDecodingError.into())
     }
 
@@ -93,7 +95,8 @@ impl Header for ConnectReturnCode {
     }
 
     fn parse_header(raw: &Bytes) -> Result<ConnectReturnCode> {
-        ConnRetCode::from_u8(raw.into_buf().get_u8()).map(|c| ConnectReturnCode(c))
+        ConnRetCode::from_u8(raw.into_buf().get_u8())
+            .map(|c| ConnectReturnCode(c))
             .ok_or(ErrorKind::PacketDecodingError.into())
     }
 
@@ -196,7 +199,8 @@ impl Header for ProtocolLevel {
     }
 
     fn parse_header(raw: &Bytes) -> Result<ProtocolLevel> {
-        ProtoLvl::from_u8(raw.into_buf().get_u8()).map(|c| ProtocolLevel(c))
+        ProtoLvl::from_u8(raw.into_buf().get_u8())
+            .map(|c| ProtocolLevel(c))
             .ok_or(ErrorKind::PacketDecodingError.into())
     }
 
@@ -228,8 +232,10 @@ impl Header for ProtocolName {
     }
 
     fn parse_header(raw: &Bytes) -> Result<ProtocolName> {
-        str::from_utf8(raw).chain_err(|| ErrorKind::PacketDecodingError)
-            .and_then(|s| MqttString::from_str(s)).map(|s| ProtocolName(s))
+        str::from_utf8(raw)
+            .chain_err(|| ErrorKind::PacketDecodingError)
+            .and_then(|s| MqttString::from_str(s))
+            .map(|s| ProtocolName(s))
     }
 
     fn fmt_header(&self, out: &mut BytesMut) -> Result<()> {
@@ -262,7 +268,7 @@ impl Header for TopicName {
     fn parse_header(raw: &Bytes) -> Result<TopicName> {
         match str::from_utf8(raw) {
             Ok(t) => MqttString::from_str(t).map(|s| TopicName(s)),
-            Err(_) => bail!(ErrorKind::PacketDecodingError)
+            Err(_) => bail!(ErrorKind::PacketDecodingError),
         }
     }
 

@@ -1,6 +1,8 @@
 #![allow(dead_code)]
 #![allow(unused_variables)]
 
+#![recursion_limit="1280"]
+
 #[macro_use]
 extern crate futures;
 extern crate tokio_core;
@@ -41,6 +43,5 @@ mod tokio;
 #[cfg(test)]
 mod tests {
     #[test]
-    fn it_works() {
-    }
+    fn it_works() {}
 }

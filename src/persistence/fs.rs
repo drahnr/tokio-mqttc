@@ -3,23 +3,26 @@ use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
 use std::fs::{read_dir, remove_file, File};
 use std::io::{self, Read, Write};
-use ::persistence::Persistence;
-use ::touch::{dir, file};
+use persistence::Persistence;
+use touch::{dir, file};
 
 pub struct FSPersistence {
     dir: PathBuf,
     index: u64,
-    cache: BTreeMap<u64, Vec<u8>>
+    cache: BTreeMap<u64, Vec<u8>>,
 }
 
 impl FSPersistence {
     pub fn new<P: AsRef<Path>>(path: P) -> io::Result<FSPersistence> {
         let p = path.as_ref();
-        dir::create(p.to_str().ok_or(io::Error::new(io::ErrorKind::Other, "Error ceating directory"))?).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        dir::create(p.to_str().ok_or(io::Error::new(
+            io::ErrorKind::Other,
+            "Error ceating directory",
+        ))?).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
         Ok(FSPersistence {
             dir: p.to_path_buf(),
             index: 0,
-            cache: BTreeMap::new()
+            cache: BTreeMap::new(),
         })
     }
 }
@@ -68,7 +71,9 @@ impl Persistence for FSPersistence {
             Entry::Occupied(o) => {
                 let (key, _) = o.remove_entry();
                 let path = self.dir.with_file_name(format!("{:x}", key));
-                let path_s = path.to_str().ok_or(io::Error::from(io::ErrorKind::InvalidInput))?;
+                let path_s = path.to_str().ok_or(
+                    io::Error::from(io::ErrorKind::InvalidInput),
+                )?;
                 file::delete(path_s).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
             }
         }
@@ -82,15 +87,22 @@ impl Persistence for FSPersistence {
                 let e = entry?;
                 let path = e.path();
                 if path.is_file() {
-                    collect.push(path.file_stem().unwrap().to_os_string().into_string().unwrap());
+                    collect.push(
+                        path.file_stem()
+                            .unwrap()
+                            .to_os_string()
+                            .into_string()
+                            .unwrap(),
+                    );
                 } else {
                     continue;
                 }
             }
             &collect.sort();
             for filename in collect {
-                let key = u64::from_str_radix(&filename, 16)
-                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                let key = u64::from_str_radix(&filename, 16).map_err(|e| {
+                    io::Error::new(io::ErrorKind::Other, e)
+                })?;
                 let path = self.dir.with_file_name(filename);
                 let mut file = File::open(path)?;
                 let mut v = Vec::new();

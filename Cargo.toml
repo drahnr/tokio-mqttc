@@ -1,7 +1,8 @@
 [package]
-name = "tokio-mqtt"
-version = "0.1.0"
-authors = ["Adam Jacobus <adam.m.jacobus@gmail.com>"]
+name = "tokio-mqttc"
+version = "0.0.1"
+authors = ["Adam Jacobus <adam.m.jacobus@gmail.com>",
+	   "Bernhard Schuster <bernhard@ahoi.io>"]
 
 [dependencies]
 futures = "0.1.14"

@@ -9,19 +9,19 @@ mod inbound_handlers;
 pub use self::mqtt_loop::{Loop, LoopClient};
 pub use self::codec::MqttCodec;
 
-use ::tokio_io::codec::Framed;
-use ::futures::Future;
-use ::futures::stream::{SplitStream, SplitSink, Peekable};
-use ::futures::sync::mpsc::{UnboundedSender, UnboundedReceiver};
-use ::futures::sync::oneshot::Sender;
-use ::regex::{escape, Regex};
+use tokio_io::codec::Framed;
+use futures::Future;
+use futures::stream::{SplitStream, SplitSink, Peekable};
+use futures::sync::mpsc::{UnboundedSender, UnboundedReceiver};
+use futures::sync::oneshot::Sender;
+use regex::{escape, Regex};
 
-use ::errors::{Result, Error, ErrorKind, ResultExt};
-use ::proto::{MqttPacket, QualityOfService};
-use ::types::{SubscriptionStream, SubItem};
-use ::persistence::Persistence;
+use errors::{Result, Error, ErrorKind, ResultExt};
+use proto::{MqttPacket, QualityOfService};
+use types::{SubscriptionStream, SubItem};
+use persistence::Persistence;
 
-type BoxFuture<T, E> = Box<Future<Item = T,Error = E>>;
+type BoxFuture<T, E> = Box<Future<Item = T, Error = E> + Send + 'static>;
 
 type RequestTuple = (MqttPacket, Sender<Result<ClientReturn>>);
 type MqttFramedReader<I> = SplitStream<Framed<I, MqttCodec>>;
@@ -31,40 +31,40 @@ type ClientQueue = Peekable<UnboundedReceiver<ClientRequest>>;
 
 pub enum ClientReturn {
     Onetime(Option<MqttPacket>),
-    Ongoing(Vec<Result<(SubscriptionStream, QualityOfService)>>)
+    Ongoing(Vec<Result<(SubscriptionStream, QualityOfService)>>),
 }
 
 pub struct ClientRequest {
     pub ack: Sender<Result<()>>,
     pub ret: Sender<Result<ClientReturn>>,
-    pub ty: ClientRequestType
+    pub ty: ClientRequestType,
 }
 
 impl ClientRequest {
-    pub fn new(ack: Sender<Result<()>>, ret: Sender<Result<ClientReturn>>, ty: ClientRequestType) -> ClientRequest {
-        ClientRequest {
-            ack,
-            ret,
-            ty
-        }
+    pub fn new(
+        ack: Sender<Result<()>>,
+        ret: Sender<Result<ClientReturn>>,
+        ty: ClientRequestType,
+    ) -> ClientRequest {
+        ClientRequest { ack, ret, ty }
     }
 }
 
 pub enum LoopRequest {
     Internal(MqttPacket),
-    External(MqttPacket, Sender<Result<ClientReturn>>)
+    External(MqttPacket, Sender<Result<ClientReturn>>),
 }
 
 pub enum ClientRequestType {
     Connect(MqttPacket, u64),
     Normal(MqttPacket),
-    Disconnect(Option<u64>)
+    Disconnect(Option<u64>),
 }
 
 pub enum TimeoutType {
     Connect,
     Ping(usize),
-    Disconnect
+    Disconnect,
 }
 
 /// These types act like tagged future items/errors, allowing the loop to know which future has
@@ -75,7 +75,7 @@ pub enum SourceItem<I> {
     GotRequest(ClientQueue, Option<ClientRequest>),
     ProcessRequest(bool, bool),
     Timeout(TimeoutType),
-    GotPingResponse
+    GotPingResponse,
 }
 
 pub enum SourceError<I> {
@@ -84,7 +84,7 @@ pub enum SourceError<I> {
     GotRequest(ClientQueue, Error),
     ProcessRequest(Error),
     Timeout(Error),
-    GotPingResponse
+    GotPingResponse,
 }
 
 impl<I> From<SourceError<I>> for Error {
@@ -95,7 +95,7 @@ impl<I> From<SourceError<I>> for Error {
             SourceError::GotRequest(_, e) => e,
             SourceError::ProcessRequest(e) => e,
             SourceError::Timeout(e) => e,
-            SourceError::GotPingResponse => unreachable!()
+            SourceError::GotPingResponse => unreachable!(),
         }
     }
 }
@@ -105,7 +105,7 @@ pub enum OneTimeKey {
     Connect,
     PingReq,
     Subscribe(u16),
-    Unsubscribe(u16)
+    Unsubscribe(u16),
 }
 
 /// ## QoS1
@@ -126,10 +126,13 @@ pub enum OneTimeKey {
 /// 2. Receive Received message
 /// 3. Send Release message, transition to Released.
 /// 4. Receive Complete message
-pub enum PublishState<P> where P: Persistence {
+pub enum PublishState<P>
+where
+    P: Persistence,
+{
     Sent(P::Key, Option<Sender<Result<ClientReturn>>>),
     Received(MqttPacket),
-    Released(P::Key, Option<Sender<Result<ClientReturn>>>)
+    Released(P::Key, Option<Sender<Result<ClientReturn>>>),
 }
 
 lazy_static!{
@@ -139,7 +142,7 @@ lazy_static!{
 
 pub struct TopicFilter {
     matcher: Regex,
-    original: String
+    original: String,
 }
 
 impl TopicFilter {
@@ -166,7 +169,7 @@ impl TopicFilter {
         let reg = format!("^{}$", collect.join("/"));
         Ok(TopicFilter {
             original: String::from(s),
-            matcher: Regex::new(&reg).chain_err(|| ErrorKind::InvalidTopicFilter)?
+            matcher: Regex::new(&reg).chain_err(|| ErrorKind::InvalidTopicFilter)?,
         })
     }
 

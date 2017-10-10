@@ -1,15 +1,17 @@
 use std::default::Default;
 
-use ::tokio_core::reactor::Handle;
-use ::tokio_io::{AsyncRead, AsyncWrite};
-use ::futures::Future;
-use ::futures::stream::Stream;
-use ::bytes::{Bytes};
-use ::proto::*;
-use ::types::{BoxMqttFuture, SubscriptionStream as SubStream};
-use ::tokio::{Loop, LoopClient, ClientReturn};
-use ::errors::{Result as MqttResult, ErrorKind, ResultExt};
-use ::persistence::Persistence;
+use tokio_core::reactor::Handle;
+use tokio_io::{AsyncRead, AsyncWrite};
+use futures::Future;
+use futures::future::IntoFuture;
+use futures::stream::Stream;
+use futures::future::result;
+use bytes::Bytes;
+use proto::*;
+use types::{BoxMqttFuture, SubscriptionStream as SubStream};
+use tokio::{Loop, LoopClient, ClientReturn};
+use errors::{Result as MqttResult, ErrorKind, ResultExt};
+use persistence::Persistence;
 
 pub struct ClientConfig {
     pub connect_timeout: u64,
@@ -18,7 +20,7 @@ pub struct ClientConfig {
     pub lwt: Option<(String, QualityOfService, bool, Bytes)>,
     pub creds: Credentials<String>,
     pub clean: bool,
-    pub client_id: Option<String>
+    pub client_id: Option<String>,
 }
 
 impl Default for ClientConfig {
@@ -30,7 +32,7 @@ impl Default for ClientConfig {
             lwt: None,
             creds: None,
             clean: true,
-            client_id: None
+            client_id: None,
         }
     }
 }
@@ -74,8 +76,13 @@ impl ClientConfig {
     ///  - The client fails to communicate before the keep-alive time expires
     ///  - The client closes the connection without sending a disconnect message
     ///  - A protocol error occurs
-    pub fn last_will(&mut self, t: String, q: QualityOfService, r: bool,
-        m: &[u8]) -> &mut ClientConfig {
+    pub fn last_will(
+        &mut self,
+        t: String,
+        q: QualityOfService,
+        r: bool,
+        m: &[u8],
+    ) -> &mut ClientConfig {
         self.lwt = Some((t, q, r, Bytes::from(m)));
         self
     }
@@ -103,16 +110,22 @@ impl ClientConfig {
 
 enum ClientState {
     Connected(LoopClient),
-    Disconnected
+    Disconnected,
 }
 
-pub struct Client<P> where P: Persistence {
+pub struct Client<P>
+where
+    P: Persistence,
+{
     state: ClientState,
     handle: Handle,
-    persistence: P
+    persistence: P,
 }
 
-impl<P> Client<P> where P: Persistence {
+impl<P> Client<P>
+where
+    P: Persistence + Send,
+{
     /// Return an empty configuration object. See `ClientConfig` for instructions on how to use.
     pub fn config() -> ClientConfig {
         ClientConfig::new()
@@ -126,11 +139,13 @@ impl<P> Client<P> where P: Persistence {
     ///
     /// `handle` is a `tokio-core::reactor::Handle`.
     pub fn new(p: P, hdl: Handle) -> MqttResult<Client<P>>
-        where P: Persistence {
+    where
+        P: Persistence,
+    {
         Ok(Client {
             state: ClientState::Disconnected,
             handle: hdl,
-            persistence: p
+            persistence: p,
         })
     }
 
@@ -152,15 +167,23 @@ impl<P> Client<P> where P: Persistence {
     ///
     /// `config` provides options to configure the client.
     pub fn connect<'p, I>(&'p mut self, io: I, cfg: &ClientConfig) -> MqttResult<Option<SubStream>>
-    where I: AsyncRead + AsyncWrite + 'static, P: Persistence {
+    where
+        I: AsyncRead + AsyncWrite + Send + 'static,
+        P: Persistence,
+    {
         // Setup a continual loop. This loop handles all the nitty gritty of reciving and
         // dispatching packets from the server. It essentially multiplexes packets to the correct
         // destination. Designed to run constantly on a Core loop, unless an error occurs.
         if let ClientState::Connected(_) = self.state {
             bail!(ErrorKind::AlreadyConnected);
         } else {
-            let (lp, mut client) = Loop::new(io, &mut self.persistence, self.handle.clone(),
-                cfg.keep_alive as u64, cfg.connect_timeout)?;
+            let (lp, mut client) = Loop::new(
+                io,
+                &mut self.persistence,
+                self.handle.clone(),
+                cfg.keep_alive as u64,
+                cfg.connect_timeout,
+            )?;
 
             // Prepare a connect packet to send using the provided values
             let lwt = if let Some((ref t, ref q, ref r, ref m)) = cfg.lwt {
@@ -184,8 +207,14 @@ impl<P> Client<P> where P: Persistence {
             } else {
                 None
             };
-            let connect = MqttPacket::connect_packet(cfg.version, lwt, cred, cfg.clean,
-                cfg.keep_alive, client_id);
+            let connect = MqttPacket::connect_packet(
+                cfg.version,
+                lwt,
+                cred,
+                cfg.clean,
+                cfg.keep_alive,
+                client_id,
+            );
             // Send packet
             let res_fut = client.request(connect)?;
             // Wait for acknowledgement
@@ -197,10 +226,10 @@ impl<P> Client<P> where P: Persistence {
                 ClientReturn::Onetime(_) => Ok(None),
                 ClientReturn::Ongoing(mut subs) => {
                     match subs.pop() {
-                        Some(Ok((s, _))) =>  Ok(Some(s.boxed())),
-                        _ => unreachable!()
+                        Some(Ok((s, _))) => Ok(Some(s.boxed())),
+                        _ => unreachable!(),
                     }
-                },
+                }
             }
         }
     }
@@ -220,8 +249,30 @@ impl<P> Client<P> where P: Persistence {
     ///
     /// If you specified an encoder, `msg` will be whatever type you specified as `Encoder::Item`.
     /// The returned future will error if the encoding fails.
-    pub fn publish(&mut self, topic: String, qos: QualityOfService, retain: bool, msg: Bytes) -> BoxMqttFuture<()> {
-        unimplemented!()
+    pub fn publish(
+        &mut self,
+        topic: String,
+        qos: QualityOfService,
+        retain: bool,
+        msg: Bytes,
+    ) -> BoxMqttFuture<()> {
+        if let &mut ClientState::Connected(ref mut client) = &mut self.state {
+            let topic = MqttString::from_str_lossy(topic.as_str());
+            let flags: PacketFlags = match qos {
+                QualityOfService::QoS2 => QOS2,
+                QualityOfService::QoS1 => QOS1,
+                _ => PacketFlags::default(),
+            };
+            let flags = if retain { flags | RET } else { flags };
+
+            let id = 777; // FIXME ever increasing with rollover
+            // prepare packet
+            let connect = MqttPacket::publish_packet(flags, topic, id, msg);
+            // Send packet
+            client.request(connect).into_future().map(|_| ()).boxed()
+        } else {
+            Box::new(result::<_, _>(Err(ErrorKind::NotConnected.into())))
+        }
     }
 
     /// Subscribe to a particular topic filter. This returns a Future which resolves to a `Stream`
@@ -236,7 +287,10 @@ impl<P> Client<P> where P: Persistence {
     /// resolve to `Stream`'s of messages matching the corresponding topic filters. The streams
     /// will stop when `unsubscribe` is called with the matching topic filter or the client
     /// disconnects.
-    pub fn subscribe_many(&mut self, subscriptions: Vec<(String, QualityOfService)>) ->  Vec<BoxMqttFuture<SubStream>>{
+    pub fn subscribe_many(
+        &mut self,
+        subscriptions: Vec<(String, QualityOfService)>,
+    ) -> Vec<BoxMqttFuture<SubStream>> {
         unimplemented!()
     }
 

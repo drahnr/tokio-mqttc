@@ -33,12 +33,12 @@ extern crate serde_derive;
 extern crate serde;
 extern crate bincode;
 
-mod errors;
-mod types;
-mod proto;
-mod client;
-mod persistence;
-mod tokio;
+pub mod errors;
+pub mod types;
+pub mod proto;
+pub mod client;
+pub mod persistence;
+pub mod tokio;
 
 #[cfg(test)]
 mod tests {

@@ -568,11 +568,7 @@ where
                 }
             };
             if let Some(sourceitem) = res {
-                // FIXME self.poll_queues(sourceitem);
-                // XXX
-                // TODO
-                // FUCK
-                return Ok(Async::NotReady);
+                self.poll_queues(sourceitem);
             }
         }
     }

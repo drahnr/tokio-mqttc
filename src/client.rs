@@ -45,13 +45,13 @@ impl ClientConfig {
     ///  - Last Will and Testament: None
     ///  - Clean Session: true
     ///  - Client ID: empty
-    pub fn new() -> ClientConfig {
-        ClientConfig::default()
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Specify how long the client should wait for the server to acknowledge a connection request.
     /// 0 means wait indefinetely.
-    pub fn connect_timeout(&mut self, t: u64) -> &mut ClientConfig {
+    pub fn connect_timeout(mut self, t: u64) -> Self {
         self.connect_timeout = t;
         self
     }
@@ -59,13 +59,13 @@ impl ClientConfig {
     /// Sets the keep alive value of the connection. If no response is recieved in `k * 1.5`
     /// seconds, the server will treat the client as disconnected. The client will send pings to
     /// the server every `k` seconds when idle.
-    pub fn keep_alive(&mut self, k: u16) -> &mut ClientConfig {
+    pub fn keep_alive(mut self, k: u16) -> Self {
         self.keep_alive = k;
         self
     }
 
     /// Specify which version of the MQTT protocol to use when communicating with the server.
-    pub fn version(&mut self, v: ProtoLvl) -> &mut ClientConfig {
+    pub fn version(mut self, v: ProtoLvl) -> Self {
         self.version = v;
         self
     }
@@ -76,25 +76,19 @@ impl ClientConfig {
     ///  - The client fails to communicate before the keep-alive time expires
     ///  - The client closes the connection without sending a disconnect message
     ///  - A protocol error occurs
-    pub fn last_will(
-        &mut self,
-        t: String,
-        q: QualityOfService,
-        r: bool,
-        m: &[u8],
-    ) -> &mut ClientConfig {
+    pub fn last_will(mut self, t: String, q: QualityOfService, r: bool, m: &[u8]) -> Self {
         self.lwt = Some((t, q, r, Bytes::from(m)));
         self
     }
 
     /// Specify the credentials the client will use when connecting to the server.
-    pub fn credentials(&mut self, user: String, pass: Option<String>) -> &mut ClientConfig {
+    pub fn credentials(mut self, user: String, pass: Option<String>) -> Self {
         self.creds = Some((user, pass));
         self
     }
 
     /// Specify whether the server should not treat this connection as a clean session.
-    pub fn unclean_session(&mut self) -> &mut ClientConfig {
+    pub fn unclean_session(mut self) -> Self {
         self.clean = true;
         self
     }
@@ -102,7 +96,7 @@ impl ClientConfig {
     /// Set the ID used to identify this client to the server. If you haven't called the
     /// `clean_session` method and have a session stored on the server, you must set this value to
     /// the ID used in past sessions.
-    pub fn client_id(&mut self, c: String) -> &mut ClientConfig {
+    pub fn client_id(mut self, c: String) -> Self {
         self.client_id = Some(c);
         self
     }

@@ -3,6 +3,14 @@ name = "tokio-mqttc"
 version = "0.0.2"
 authors = ["Adam Jacobus <adam.m.jacobus@gmail.com>",
 	   "Bernhard Schuster <bernhard@ahoi.io>"]
+description = "A mqttc client based on tokio-rs, this is still early stage prototoy"
+readme = "README.md"
+license = "Apache-2.0 OR MIT"
+keywords = ["mqtt", "client", "async", "tokio", "mqttc"]
+repository = "https://github.com/drahnr/tokio-mqttc"
+homepage = "https://github.com/drahnr/tokio-mqttc"
+documentation = "https://docs.rs/tokio-mqttc"
+
 
 [dependencies]
 futures = "0.1.14"

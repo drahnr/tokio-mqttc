@@ -9,7 +9,7 @@ use std::io;
 use errors::{ErrorKind as MqttErrorKind, Result as MqttResult};
 use errors::proto;
 use nom::IResult;
-use linked_hash_map::LinkedHashMap;
+use linked_hash_map::{Entry,LinkedHashMap};
 use bytes::{Bytes, BytesMut, BufMut, Writer};
 use self::parsers::packet;
 use self::headers::*;
@@ -47,15 +47,24 @@ impl Headers {
     }
 
     pub fn set<H: Header>(&mut self, value: H) {
-        unimplemented!()
+        let mut bytes = BytesMut::new();
+        let key = H::header_name().into();
+        let value = value.fmt_header(&mut bytes);
+        let _ = self.data.insert(key, bytes.to_vec());
     }
 
     pub fn set_raw(&mut self, name: &'static str, value: &[u8]) {
-        self.data.insert(name.into(), Vec::from(value));
+        let _ = self.data.insert(name.into(),Vec::from(value));
     }
 
     pub fn get<H: Header>(&self) -> Option<H> {
-        unimplemented!()
+        let key = H::header_name().into();
+        self.data.get(key)
+                .ok_or(MqttErrorKind::PacketDecodingError.into())
+                .and_then(|raw| {
+                    let raw : Bytes = Bytes::from(raw.as_slice());
+                    H::parse_header(&raw)
+                }).ok()
     }
 
     pub fn encode(&self, out: &mut BytesMut) {

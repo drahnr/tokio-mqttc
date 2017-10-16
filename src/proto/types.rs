@@ -211,6 +211,11 @@ pub struct LWTMessage {
     pub message: Bytes,
 }
 
+
+/// Last Will and Testament
+///
+/// This is sent if a client disconnects ungracefully to the specified topic.
+/// The broker will discard this message if a DISCONNECT is received by the broker.
 impl LWTMessage {
     pub fn new(t: MqttString, q: QualityOfService, r: bool, m: Bytes) -> LWTMessage {
         LWTMessage {

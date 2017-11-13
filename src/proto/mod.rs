@@ -36,7 +36,7 @@ fn encode_vle(num: usize) -> Option<Bytes> {
     return Some(collect.freeze());
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Headers {
     data: LinkedHashMap<String, Vec<u8>>,
 }
@@ -55,6 +55,11 @@ impl Headers {
 
     pub fn set_raw(&mut self, name: &'static str, value: &[u8]) {
         let _ = self.data.insert(name.into(),Vec::from(value));
+    }
+
+    pub fn get_raw<H: Header>(&self) -> Option<&Vec<u8>> {
+        let key : String = H::header_name().into();
+        self.data.get(&key)
     }
 
     pub fn get<H: Header>(&self) -> Option<H> {
@@ -80,7 +85,7 @@ pub trait Header: Sized {
     fn fmt_header(&self, out: &mut BytesMut) -> MqttResult<()>;
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct MqttPacket {
     pub ty: PacketType,
     pub flags: PacketFlags,

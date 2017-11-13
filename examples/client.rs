@@ -53,35 +53,40 @@ fn run() -> Result<()> {
 
     let mut core = Core::new().chain_err(|| ErrorKind::DummyError)?;
 
-
-    println!("socket addr parse");
-
     let sock_addr: std::net::SocketAddr = "127.0.0.1:1883".parse()?;
+
+    println!("client spawn");
 
     let mut client = Client::new(
         tokio_mqttc::persistence::MemoryPersistence::new(),
         core.handle(),
     )?;
 
+
     let work = tokio_core::net::TcpStream::connect(&sock_addr, &core.handle())
         .map_err(|_| tokio_mqttc::errors::ErrorKind::ClientUnavailable.into())
         .and_then(|io| {
-            println!("tcp connect");
 
+            println!("tcp connect");
             client.connect(io, &cfg).and_then(|_| {
-                println!("pub publish");
+                println!("mqtt connect");
                 client.publish(
                     "xx".to_owned(),
-                    QualityOfService::QoS0,
+                    QualityOfService::QoS1,
                     false,
                     "abcdef".as_bytes().into(),
-                );
-                Ok(())
-            })
+                ).and_then(|_| {
+                    client.disconnect(Some(30))
+                })
+            }
+            )
             //.map_err(|_| ErrorKind::DummyError.into())
         });
 
-    core.run(work).unwrap();
+    println!("Prepped");
+    core.run(work)?;
+
+    println!("Done with all the work");
     Ok(())
 }
 

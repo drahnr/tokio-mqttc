@@ -32,6 +32,8 @@ impl<'p> ResponseHandler<'p> {
 
         use proto::PacketType::*;
 
+        println!("Package received in ResponseHandler {:?}", packet);
+
         let inner = match packet.ty {
             PingResp => ping_response::ping_response_handler(data_lock),
             PubAck => publish_ack::publish_ack_handler(packet, data_lock),

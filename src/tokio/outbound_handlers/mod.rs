@@ -25,6 +25,8 @@ impl<'p> RequestHandler<'p> {
 
         use proto::PacketType::*;
 
+        println!("Package scheduled for send in RequestHandler {:?}", packet);
+
         let inner: Box<Future<Item = (), Error = Error> + 'p + Send> = match packet.ty {
             PingReq => Box::new(ping_request::PingRequestHandler::new(
                 (packet, client),

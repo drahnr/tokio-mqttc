@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 use std::mem;
 
+use futures::future;
 use futures::{Poll, Async};
 use futures::future::Future;
 use futures::stream::{Stream, FuturesUnordered, futures_unordered};
@@ -24,6 +25,7 @@ use super::response::ResponseProcessor;
 use super::request::RequestProcessor;
 
 enum State {
+    
     Disconnected(UnboundedSender<ClientRequest>),
     Running(UnboundedSender<ClientRequest>),
     Disconnecting(UnboundedSender<ClientRequest>),
@@ -39,26 +41,33 @@ impl LoopClient {
         LoopClient { state: Some(State::Disconnected(q)) }
     }
 
+    /// sends without further checks
     fn send_request<F>(
         sender: UnboundedSender<ClientRequest>,
         req_ty: ClientRequestType,
         next_state: F,
-    ) -> Result<(State, Result<BoxFuture<Result<ClientReturn>, Canceled>>)>
+    ) -> Result<(State, BoxFuture<Result<ClientReturn>, Canceled>)>
     where
         F: FnOnce(UnboundedSender<ClientRequest>) -> State,
     {
 
         let (tx, rx) = channel::<Result<ClientReturn>>();
         let (init_tx, init_rx) = channel::<Result<()>>();
+        println!("ClientRequest {:?}", req_ty);
         let req = ClientRequest::new(init_tx, tx, req_ty);
-        if let Err(e) = sender.send(req).chain_err(|| ErrorKind::LoopCommsError) {
-            Ok((State::Closed, Err(e)))
+        if let Err(e) = sender.unbounded_send(req).chain_err(|| ErrorKind::LoopCommsError) {
+            // let res = future::ok::<Result<ClientReturn>, Canceled>(Err(e.into()));
+            // Ok((State::Closed, Box::new(res)));
+            println!("sender unbounded_send {:?}", e);
+            Err(e.into())
         } else {
-            if let Err(e) = init_rx.wait().map_err(|_| ErrorKind::LoopCommsError)? {
-                Ok((State::Closed, Err(e)))
-            } else {
-                Ok((next_state(sender), Ok(rx.boxed())))
-            }
+            Ok((next_state(sender), rx.boxed()))
+            // FIXME
+            // if let Err(e) = init_rx.map_err(|_| ErrorKind::LoopCommsError)? {
+            //     Ok((State::Closed, Err(e)))
+            // } else {
+            //     Ok((next_state(sender), Ok(rx.boxed())))
+            // }
         }
     }
 
@@ -67,6 +76,7 @@ impl LoopClient {
         packet: MqttPacket,
         connect_timeout: u64,
     ) -> Result<BoxFuture<Result<ClientReturn>, Canceled>> {
+        println!("LoopClient :: connect");
         use self::State::*;
         match self.state {
             Some(Disconnected(_)) => {
@@ -77,10 +87,10 @@ impl LoopClient {
                 let (next, ret) = LoopClient::send_request(
                     q,
                     ClientRequestType::Connect(packet, connect_timeout),
-                    |q| State::Running(q),
+                    |q| { State::Running(q) } ,
                 )?;
                 self.state = Some(next);
-                ret
+                Ok(ret)
             }
             Some(Running(_)) => Err(ErrorKind::AlreadyConnected.into()),
             Some(Disconnecting(_)) => Err(ErrorKind::ClientUnavailable.into()),
@@ -93,6 +103,7 @@ impl LoopClient {
         &mut self,
         packet: MqttPacket,
     ) -> Result<BoxFuture<Result<ClientReturn>, Canceled>> {
+        println!("LoopClient :: request");
         use self::State::*;
         match self.state {
             Some(Running(_)) => {
@@ -103,10 +114,10 @@ impl LoopClient {
                 let (next, ret) = LoopClient::send_request(
                     q,
                     ClientRequestType::Normal(packet),
-                    |q| State::Running(q),
+                    |q| { State::Running(q) },
                 )?;
                 self.state = Some(next);
-                ret
+                Ok(ret)
             }
             _ => Err(ErrorKind::ClientUnavailable.into()),
         }
@@ -117,6 +128,7 @@ impl LoopClient {
         timeout: Option<u64>,
     ) -> Result<BoxFuture<Result<ClientReturn>, Canceled>> {
 
+        println!("LoopClient :: disconnect");
         match self.state.take() {
             Some(State::Running(q)) => {
                 let (next, ret) =
@@ -124,7 +136,7 @@ impl LoopClient {
                         State::Disconnecting(q)
                     })?;
                 self.state = Some(next);
-                ret
+                Ok(ret)
             }
             _ => return Err(ErrorKind::ClientUnavailable.into()),
         }
@@ -317,12 +329,12 @@ where
             .boxed()
     }
 
-    fn poll_queues(&mut self, mut res: SourceItem<I>) -> Poll<(), ::tokio::SourceError<I>> {
+    fn poll_queues(&mut self, res: SourceItem<I>) -> Poll<(), ::tokio::SourceError<I>> {
         match res {
             SourceItem::GotRequest(mut queue, request) => {
-                let mut current_state = &mut self.status;
+                let current_state = &mut self.status;
                 match *current_state {
-                    LoopStatus::Connected => {
+                    LoopStatus::Connected | LoopStatus::Connecting(_) => {
                         use super::ClientRequestType::*;
 
                         match request {
@@ -353,6 +365,7 @@ where
                                     }
                                     _ => {}
                                 }
+                                println!("ClientRequest");
                                 // FIXME TODO ?
                             }
                             Some(ClientRequest {
@@ -369,7 +382,7 @@ where
                                     let timeout_fut =
                                         Loop::<I, P>::make_timeout(timer, TimeoutType::Disconnect);
                                     self.sources.push(timeout_fut);
-                                    // Move state to Disconnecting
+                                    // We are now in state Disconnecting
                                     *current_state =
                                         LoopStatus::Disconnecting(DisconnectState::Waiting, ret);
                                 } else {
@@ -385,6 +398,9 @@ where
                                 *current_state =
                                     LoopStatus::PendingError(ErrorKind::LoopCommsError.into());
                             }
+                            _ => {
+                                println!("Interesting stuff");
+                            }
                         }
                     }
                     LoopStatus::PendingError(_) => {
@@ -392,8 +408,9 @@ where
                             LoopStatus::PendingError(e) => e,
                             _ => unreachable!(),
                         };
+                        //let q : Option<u8> = request;
                         if let Some(req) = request {
-                            let _ = req.ack.send(Err(e));
+                            let _ = req.ack.send(Err(e.into()));
                             return Ok(Async::Ready(()));
                         }
                     }
@@ -414,10 +431,12 @@ where
             }
             SourceItem::GotResponse(stream, packet) => {
                 // received a message from the broker
-                // push the message wrapped into a SourceItem<I> into the queue of messages to be processed
+                // push the message wrapped into a SourceItem<I>
+                // into the queue of messages to be processed
                 let mut current_state = &mut self.status;
                 match current_state {
                     &mut LoopStatus::Connected |
+                    &mut LoopStatus::Connecting(_) |
                     &mut LoopStatus::Disconnecting(_, _) => {
                         if let Some(ref p) = packet {
                             self.sources.push(Loop::<I, P>::response_wrapper(stream));
@@ -434,6 +453,7 @@ where
             SourceItem::ProcessResponse(ref sent, ref work) => {
                 let current_state = &mut self.status;
                 match current_state {
+                    &mut LoopStatus::Connecting(_) |
                     &mut LoopStatus::Connected => {
                         self.inflight = *work;
                         if *sent {
@@ -553,6 +573,7 @@ where
     type Error = ::tokio::SourceError<I>;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        println!("Loop :: poll");
         loop {
             if let LoopStatus::Done = self.status {
                 return Ok(Async::Ready(()));
@@ -568,7 +589,8 @@ where
                 }
             };
             if let Some(sourceitem) = res {
-                self.poll_queues(sourceitem);
+                println!("Got something to do");
+                let _ = self.poll_queues(sourceitem)?;
             }
         }
     }

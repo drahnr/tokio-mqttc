@@ -160,7 +160,7 @@ where
     /// its previous subscriptions.
     ///
     /// `config` provides options to configure the client.
-    pub fn connect<'p, I>(&'p mut self, io: I, cfg: &ClientConfig) -> MqttResult<Option<SubStream>>
+    pub fn connect<'p, I>(&'p mut self, io: I, cfg: &ClientConfig) -> BoxMqttFuture<()>
     where
         I: AsyncRead + AsyncWrite + Send + 'static,
         P: Persistence,
@@ -169,7 +169,7 @@ where
         // dispatching packets from the server. It essentially multiplexes packets to the correct
         // destination. Designed to run constantly on a Core loop, unless an error occurs.
         if let ClientState::Connected(_) = self.state {
-            bail!(ErrorKind::AlreadyConnected);
+            return Box::new(result::<_, _>(Err(ErrorKind::AlreadyConnected.into())));
         } else {
             let (lp, mut client) = Loop::new(
                 io,
@@ -177,27 +177,27 @@ where
                 self.handle.clone(),
                 cfg.keep_alive as u64,
                 cfg.connect_timeout,
-            )?;
+            ).unwrap();
 
             // Prepare a connect packet to send using the provided values
             let lwt = if let Some((ref t, ref q, ref r, ref m)) = cfg.lwt {
-                let topic = MqttString::from_str(&t)?;
+                let topic = MqttString::from_str(&t).unwrap();
                 Some(LWTMessage::new(topic, q.clone(), *r, m.clone()))
             } else {
                 None
             };
             let client_id = if let Some(ref cid) = cfg.client_id {
-                Some(MqttString::from_str(&cid)?)
+                Some(MqttString::from_str(&cid).unwrap())
             } else {
                 None
             };
             let cred = if let Some((ref user, ref p)) = cfg.creds {
                 let pwd = if let &Some(ref pass) = p {
-                    Some(MqttString::from_str(pass)?)
+                    Some(MqttString::from_str(pass).unwrap())
                 } else {
                     None
                 };
-                Some((MqttString::from_str(&user)?, pwd))
+                Some((MqttString::from_str(&user).unwrap(), pwd))
             } else {
                 None
             };
@@ -210,21 +210,12 @@ where
                 client_id,
             );
             // Send packet
-            let res_fut = client.request(connect)?;
-            // Wait for acknowledgement
-            let res = res_fut.wait().chain_err(|| ErrorKind::LoopAbortError)?;
-
-            self.state = ClientState::Connected(client);
-
-            match res? {
-                ClientReturn::Onetime(_) => Ok(None),
-                ClientReturn::Ongoing(mut subs) => {
-                    match subs.pop() {
-                        Some(Ok((s, _))) => Ok(Some(s.boxed())),
-                        _ => unreachable!(),
-                    }
-                }
+            //client.request(connect).into_future().map(|_| () ).boxed()
+            self.state = ClientState::Connected(client); // FIXME TODO this is a race condition de lux
+            if let ClientState::Connected( ref mut client ) = self.state {
+                return client.connect(connect, 30).into_future().map(|_| ()).boxed();
             }
+            unreachable!()
         }
     }
 
@@ -235,7 +226,13 @@ where
     /// false meaning the timeout occurred before work could finish. All streams will still recieve
     /// packets until the the disconnect packet is issued
     pub fn disconnect(&mut self, timeout: Option<u64>) -> BoxMqttFuture<bool> {
-        unimplemented!()
+        let x = if let ClientState::Connected(ref mut client) = self.state {
+            client.disconnect(timeout) .into_future().map(|_| false).boxed() // FIXME hardcode false should be dynamic
+        } else {
+            Box::new(result::<_, _>(Err(ErrorKind::AlreadyConnected.into())))
+        };
+        self.state = ClientState::Disconnected;
+        x
     }
 
     /// Publish a message to a particular topic with a particular QoS level. Returns a future that
@@ -261,9 +258,9 @@ where
 
             let id = 777; // FIXME ever increasing with rollover
             // prepare packet
-            let connect = MqttPacket::publish_packet(flags, topic, id, msg);
+            let publish = MqttPacket::publish_packet(flags, topic, id, msg);
             // Send packet
-            client.request(connect).into_future().map(|_| ()).boxed()
+            client.request(publish).into_future().map(|_| ()).boxed()
         } else {
             Box::new(result::<_, _>(Err(ErrorKind::NotConnected.into())))
         }

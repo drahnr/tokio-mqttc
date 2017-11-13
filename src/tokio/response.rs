@@ -52,45 +52,6 @@ where
             data_lock,
         }
     }
-
-    fn process_conn_ack(
-        mut data: FutMutexGuard<LoopData<'p, P>>,
-        packet: MqttPacket,
-    ) -> result::Result<Option<MqttPacket>, SourceError<I>> {
-        // Check if we are awaiting a CONNACK
-        let (_, client) = match data.one_time.entry(OneTimeKey::Connect) {
-            Entry::Vacant(v) => {
-                return Err(SourceError::ProcessResponse(
-                    ErrorKind::from(
-                        ProtoErrorKind::UnexpectedResponse(packet.ty.clone()),
-                    ).into(),
-                ));
-            }
-            Entry::Occupied(o) => o.remove(),
-        };
-        // Validate connect return code
-        let crc = packet.headers.get::<ConnectReturnCode>().unwrap();
-        if crc.is_ok() {
-            // If session is not clean, setup a stream.
-            let sess = packet.headers.get::<ConnectAckFlags>().unwrap();
-            if sess.is_clean() {
-                let _ = client.send(Ok(ClientReturn::Onetime(Some(packet))));
-            } else {
-                let (tx, rx) = unbounded::<SubItem>();
-                let custom_rx = rx.map_err(|_| Error::from(ErrorKind::LoopCommsError));
-                data.session_subs = Some(tx);
-                let _ = client.send(Ok(ClientReturn::Ongoing(
-                    vec![Ok((custom_rx.boxed(), QualityOfService::QoS0))],
-                )));
-            }
-            Ok(None)
-        } else {
-            return Err(SourceError::ProcessResponse(
-                ErrorKind::from(ProtoErrorKind::ConnectionRefused(*crc))
-                    .into(),
-            ));
-        }
-    }
 }
 
 impl<'p, I, P> Future for ResponseProcessor<'p, I, P>
@@ -103,7 +64,7 @@ where
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         use self::State::*;
-
+        println!("Poll ResponseProcessor");
         loop {
             match self.state {
                 Some(Receiving) => {

@@ -186,7 +186,7 @@ impl fmt::Display for QualityOfService {
 }
 
 enum_from_primitive!{
-    #[derive(Clone, Copy, Serialize, Deserialize)]
+    #[derive(Clone, Copy, Serialize, Deserialize, Debug)]
     pub enum SubAckReturnCode {
         SuccessQoS0 = 0,
         SuccessQoS1 = 1,
@@ -244,7 +244,7 @@ impl LWTMessage {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct MqttString(String);
 
 impl MqttString {
@@ -289,7 +289,7 @@ impl Into<String> for MqttString {
 
 pub type Credentials<T> = Option<(T, Option<T>)>;
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Subscription {
     pub topic: MqttString,
     pub qos: QualityOfService,
@@ -307,7 +307,7 @@ impl Subscription {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum Payload {
     Connect(MqttString, Option<(MqttString, Vec<u8>)>, Credentials<MqttString>),
     Subscribe(Vec<Subscription>),

@@ -1,6 +1,6 @@
 mod codec;
 mod mqtt_loop;
-mod connect;
+//mod connect;
 mod response;
 mod request;
 mod outbound_handlers;
@@ -55,12 +55,14 @@ pub enum LoopRequest {
     External(MqttPacket, Sender<Result<ClientReturn>>),
 }
 
+#[derive(Debug)]
 pub enum ClientRequestType {
     Connect(MqttPacket, u64),
     Normal(MqttPacket),
     Disconnect(Option<u64>),
 }
 
+#[derive(Debug)]
 pub enum TimeoutType {
     Connect,
     Ping(usize),

@@ -68,24 +68,29 @@ fn run() -> Result<()> {
         .and_then(|io| {
             println!("tcp connect");
 
-            client.connect(io, &cfg).and_then(|_| {
+
+
+            client.connect(io, &cfg).and_then(|(client, lp, _opt_old)| {
+//                 use futures::stream::FuturesUnordered;
+
+//                 let mut fm = Box::new(FuturesUnordered::new());
+// fm.into_future()
                 println!("pub publish");
+
                 client.publish(
                     "xx".to_owned(),
                     QualityOfService::QoS0,
                     false,
                     "abcdef".as_bytes().into(),
                 );
-                Ok(())
+
+                Ok(lp)
             })
             //.map_err(|_| ErrorKind::DummyError.into())
         });
+    // let x : u8 = work;
 
-
-    let work = work.map(|_| ());
-    let x = work.join(client);
-
-    core.run(x).unwrap();
+    core.run(work).unwrap();
     Ok(())
 }
 

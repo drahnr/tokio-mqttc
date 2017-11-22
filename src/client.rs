@@ -107,23 +107,18 @@ enum ClientState {
     Disconnected,
 }
 
-pub struct Client<'p, P, I>
+pub struct Client<P>
 where
-    I: AsyncRead + AsyncWrite + Send + 'static,
-    P: Persistence + Send + 'p,
+    P: Persistence + Send,
 {
     state: ClientState,
     handle: Handle,
     persistence: P,
-    looper: Option<Loop<'p, I, P>>,
-
 }
 
-impl<'p, P, I> Client<'p, P, I>
+impl<P> Client<P>
 where
-    I: AsyncRead + AsyncWrite + Send + 'static,
-    P: Persistence + Send + 'p,
-    'p: 'static
+    P: Persistence + Send,
 {
     /// Return an empty configuration object. See `ClientConfig` for instructions on how to use.
     pub fn config() -> ClientConfig {
@@ -137,7 +132,7 @@ where
     /// `config` provides options to configure the client.
     ///
     /// `handle` is a `tokio-core::reactor::Handle`.
-    pub fn new(persistence: P, handle: Handle) -> MqttResult<Client<'p, P,I>>
+    pub fn new(persistence: P, handle: Handle) -> MqttResult<Client<P>>
     where
         P: Persistence,
     {
@@ -145,7 +140,6 @@ where
             state: ClientState::Disconnected,
             persistence: persistence,
             handle : handle,
-            looper: None,
         })
     }
 
@@ -166,7 +160,7 @@ where
     /// its previous subscriptions.
     ///
     /// `config` provides options to configure the client.
-    pub fn connect(&'p mut self, io: I, cfg: &ClientConfig) -> MqttResult<Option<SubStream>>
+    pub fn connect<'p,I>(mut self, io: I, cfg: &ClientConfig) -> MqttResult<(Client<P>, Loop<'p, I, P>, Option<SubStream>)>
     where
         I: AsyncRead + AsyncWrite + Send + 'static,
         P: Persistence,
@@ -185,8 +179,6 @@ where
             cfg.keep_alive as u64,
             cfg.connect_timeout,
         )?;
-
-        self.looper = Some(lp);
 
         // Prepare a connect packet to send using the provided values
         let lwt = if let Some((ref t, ref q, ref r, ref m)) = cfg.lwt {
@@ -220,16 +212,19 @@ where
         );
         // Send packet
         let res_fut = lp_client.request(connect)?;
+
+        // FIXME this is fucked up
+
         // Wait for acknowledgement
         let res = res_fut.wait().chain_err(|| ErrorKind::LoopAbortError)?;
 
         self.state = ClientState::Connected(lp_client);
 
         match res? {
-            ClientReturn::Onetime(_) => Ok(None),
+            ClientReturn::Onetime(_) => Ok((self, lp,None)),
             ClientReturn::Ongoing(mut subs) => {
                 match subs.pop() {
-                    Some(Ok((s, _))) => Ok(Some(s.boxed())),
+                    Some(Ok((s, _))) => Ok((self, lp,Some(s.boxed()))),
                     _ => unreachable!(),
                 }
             }
@@ -258,7 +253,7 @@ where
         retain: bool,
         msg: Bytes,
     ) -> BoxMqttFuture<()> {
-        if let &mut ClientState::Connected(ref mut client) = &mut self.state {
+        if let &mut ClientState::Connected(ref mut lp_client) = &mut self.state {
             let topic = MqttString::from_str_lossy(topic.as_str());
             let flags: PacketFlags = match qos {
                 QualityOfService::QoS2 => QOS2,
@@ -271,7 +266,7 @@ where
             // prepare packet
             let connect = MqttPacket::publish_packet(flags, topic, id, msg);
             // Send packet
-            client.request(connect).into_future().map(|_| ()).boxed()
+            lp_client.request(connect).into_future().map(|_| ()).boxed()
         } else {
             Box::new(result::<_, _>(Err(ErrorKind::NotConnected.into())))
         }
@@ -320,26 +315,3 @@ where
         unimplemented!()
     }
 }
-
-use futures::{Poll, Async, AsyncSink};
-
-impl<'p, P,I> Future for Client<'p, P, I>
-where
-    I: AsyncRead + AsyncWrite + Send + 'static,
-    P: Persistence + Send + 'p,
-    'p: 'static {
-    type Item = ();
-    type Error = ::errors::Error;
-
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        match self.looper.poll() {
-            Ok(Async::NotReady) => Ok(Async::NotReady),
-            Ok(Async::Ready(r)) =>Ok(Async::Ready(())),
-            Err(e) => panic!("panic"),
-        }
-        // match self.state {
-        //     ClientState::Connected(client) => looper.poll(),
-        //     _ => Ok(Async::NotReady),
-        // }
-    }
-} 

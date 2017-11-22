@@ -107,18 +107,23 @@ enum ClientState {
     Disconnected,
 }
 
-pub struct Client<P>
+pub struct Client<'p, P, I>
 where
-    P: Persistence,
+    I: AsyncRead + AsyncWrite + Send + 'static,
+    P: Persistence + Send + 'p,
 {
     state: ClientState,
     handle: Handle,
     persistence: P,
+    looper: Option<Loop<'p, I, P>>,
+
 }
 
-impl<P> Client<P>
+impl<'p, P, I> Client<'p, P, I>
 where
-    P: Persistence + Send,
+    I: AsyncRead + AsyncWrite + Send + 'static,
+    P: Persistence + Send + 'p,
+    'p: 'static
 {
     /// Return an empty configuration object. See `ClientConfig` for instructions on how to use.
     pub fn config() -> ClientConfig {
@@ -132,14 +137,15 @@ where
     /// `config` provides options to configure the client.
     ///
     /// `handle` is a `tokio-core::reactor::Handle`.
-    pub fn new(p: P, hdl: Handle) -> MqttResult<Client<P>>
+    pub fn new(persistence: P, handle: Handle) -> MqttResult<Client<'p, P,I>>
     where
         P: Persistence,
     {
         Ok(Client {
             state: ClientState::Disconnected,
-            handle: hdl,
-            persistence: p,
+            persistence: persistence,
+            handle : handle,
+            looper: None,
         })
     }
 
@@ -160,7 +166,7 @@ where
     /// its previous subscriptions.
     ///
     /// `config` provides options to configure the client.
-    pub fn connect<'p, I>(&'p mut self, io: I, cfg: &ClientConfig) -> MqttResult<Option<SubStream>>
+    pub fn connect(&'p mut self, io: I, cfg: &ClientConfig) -> MqttResult<Option<SubStream>>
     where
         I: AsyncRead + AsyncWrite + Send + 'static,
         P: Persistence,
@@ -170,59 +176,61 @@ where
         // destination. Designed to run constantly on a Core loop, unless an error occurs.
         if let ClientState::Connected(_) = self.state {
             bail!(ErrorKind::AlreadyConnected);
+        }
+
+        let (mut lp, mut lp_client) = Loop::new(
+            io,
+            &mut self.persistence,
+            self.handle.clone(),
+            cfg.keep_alive as u64,
+            cfg.connect_timeout,
+        )?;
+
+        self.looper = Some(lp);
+
+        // Prepare a connect packet to send using the provided values
+        let lwt = if let Some((ref t, ref q, ref r, ref m)) = cfg.lwt {
+            let topic = MqttString::from_str(&t)?;
+            Some(LWTMessage::new(topic, q.clone(), *r, m.clone()))
         } else {
-            let (lp, mut client) = Loop::new(
-                io,
-                &mut self.persistence,
-                self.handle.clone(),
-                cfg.keep_alive as u64,
-                cfg.connect_timeout,
-            )?;
-
-            // Prepare a connect packet to send using the provided values
-            let lwt = if let Some((ref t, ref q, ref r, ref m)) = cfg.lwt {
-                let topic = MqttString::from_str(&t)?;
-                Some(LWTMessage::new(topic, q.clone(), *r, m.clone()))
+            None
+        };
+        let client_id = if let Some(ref cid) = cfg.client_id {
+            Some(MqttString::from_str(&cid)?)
+        } else {
+            None
+        };
+        let cred = if let Some((ref user, ref p)) = cfg.creds {
+            let pwd = if let &Some(ref pass) = p {
+                Some(MqttString::from_str(pass)?)
             } else {
                 None
             };
-            let client_id = if let Some(ref cid) = cfg.client_id {
-                Some(MqttString::from_str(&cid)?)
-            } else {
-                None
-            };
-            let cred = if let Some((ref user, ref p)) = cfg.creds {
-                let pwd = if let &Some(ref pass) = p {
-                    Some(MqttString::from_str(pass)?)
-                } else {
-                    None
-                };
-                Some((MqttString::from_str(&user)?, pwd))
-            } else {
-                None
-            };
-            let connect = MqttPacket::connect_packet(
-                cfg.version,
-                lwt,
-                cred,
-                cfg.clean,
-                cfg.keep_alive,
-                client_id,
-            );
-            // Send packet
-            let res_fut = client.request(connect)?;
-            // Wait for acknowledgement
-            let res = res_fut.wait().chain_err(|| ErrorKind::LoopAbortError)?;
+            Some((MqttString::from_str(&user)?, pwd))
+        } else {
+            None
+        };
+        let connect = MqttPacket::connect_packet(
+            cfg.version,
+            lwt,
+            cred,
+            cfg.clean,
+            cfg.keep_alive,
+            client_id,
+        );
+        // Send packet
+        let res_fut = lp_client.request(connect)?;
+        // Wait for acknowledgement
+        let res = res_fut.wait().chain_err(|| ErrorKind::LoopAbortError)?;
 
-            self.state = ClientState::Connected(client);
+        self.state = ClientState::Connected(lp_client);
 
-            match res? {
-                ClientReturn::Onetime(_) => Ok(None),
-                ClientReturn::Ongoing(mut subs) => {
-                    match subs.pop() {
-                        Some(Ok((s, _))) => Ok(Some(s.boxed())),
-                        _ => unreachable!(),
-                    }
+        match res? {
+            ClientReturn::Onetime(_) => Ok(None),
+            ClientReturn::Ongoing(mut subs) => {
+                match subs.pop() {
+                    Some(Ok((s, _))) => Ok(Some(s.boxed())),
+                    _ => unreachable!(),
                 }
             }
         }
@@ -312,3 +320,26 @@ where
         unimplemented!()
     }
 }
+
+use futures::{Poll, Async, AsyncSink};
+
+impl<'p, P,I> Future for Client<'p, P, I>
+where
+    I: AsyncRead + AsyncWrite + Send + 'static,
+    P: Persistence + Send + 'p,
+    'p: 'static {
+    type Item = ();
+    type Error = ::errors::Error;
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        match self.looper.poll() {
+            Ok(Async::NotReady) => Ok(Async::NotReady),
+            Ok(Async::Ready(r)) =>Ok(Async::Ready(())),
+            Err(e) => panic!("panic"),
+        }
+        // match self.state {
+        //     ClientState::Connected(client) => looper.poll(),
+        //     _ => Ok(Async::NotReady),
+        // }
+    }
+} 

@@ -81,7 +81,11 @@ fn run() -> Result<()> {
             //.map_err(|_| ErrorKind::DummyError.into())
         });
 
-    core.run(work).unwrap();
+
+    let work = work.map(|_| ());
+    let x = work.join(client);
+
+    core.run(x).unwrap();
     Ok(())
 }
 

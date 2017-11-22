@@ -4,7 +4,7 @@ use std::mem;
 
 use futures::{Poll, Async};
 use futures::future::Future;
-use futures::stream::{Stream, FuturesUnordered, futures_unordered};
+use futures::stream::{Stream, FuturesUnordered, futures_unordered, SplitSink};
 use futures::sync::oneshot::{channel, Sender, Canceled};
 use futures::sync::mpsc::{unbounded, UnboundedSender};
 use tokio_io::{AsyncRead, AsyncWrite};
@@ -34,11 +34,13 @@ pub struct LoopClient {
     state: Option<State>,
 }
 
+/// actual handling of the interfacing with the loop
 impl LoopClient {
     pub fn new(q: UnboundedSender<ClientRequest>) -> LoopClient {
         LoopClient { state: Some(State::Disconnected(q)) }
     }
 
+    ///push a queue to the client
     fn send_request<F>(
         sender: UnboundedSender<ClientRequest>,
         req_ty: ClientRequestType,
@@ -47,10 +49,10 @@ impl LoopClient {
     where
         F: FnOnce(UnboundedSender<ClientRequest>) -> State,
     {
-
         let (tx, rx) = channel::<Result<ClientReturn>>();
         let (init_tx, init_rx) = channel::<Result<()>>();
         let req = ClientRequest::new(init_tx, tx, req_ty);
+        // send the request to the queue
         if let Err(e) = sender.send(req).chain_err(|| ErrorKind::LoopCommsError) {
             Ok((State::Closed, Err(e)))
         } else {
@@ -248,6 +250,8 @@ where
     inflight: bool,
     // Holds the ID of the current timer
     timer_flag: Option<usize>,
+    // the ultimate sink for requests to write to
+    sink: MqttFramedWriter<I>,
 }
 
 impl<'p, I, P> Loop<'p, I, P>
@@ -255,6 +259,8 @@ where
     I: AsyncRead + AsyncWrite + Send + 'static,
     P: 'p + Send + Persistence,
 {
+
+    // create a new loop with attached loop client
     pub fn new(
         io: I,
         persist: &'p mut P,
@@ -285,10 +291,12 @@ where
             sources: sources,
             inflight: false,
             timer_flag: None,
+            sink : fwrite,
         };
         Ok((l, client))
     }
 
+    /// transforms a ClientQueue stream into a future, with error mapping
     fn request_wrapper(stream: ClientQueue) -> BoxFuture<SourceItem<I>, SourceError<I>> {
         Box::new(
             stream
@@ -300,6 +308,7 @@ where
         )
     }
 
+    /// transforms a ClientQueue stream into a future, with error mapping
     fn response_wrapper(stream: MqttFramedReader<I>) -> BoxFuture<SourceItem<I>, SourceError<I>> {
         Box::new(
             stream
@@ -309,6 +318,7 @@ where
         )
     }
 
+    /// creates a timeout
     fn make_timeout(timeout: Timeout, ty: TimeoutType) -> BoxFuture<SourceItem<I>, SourceError<I>> {
 
         timeout
@@ -319,13 +329,17 @@ where
 
     fn poll_queues(&mut self, mut res: SourceItem<I>) -> Poll<(), ::tokio::SourceError<I>> {
         match res {
+            // we have a request right here in our hands
             SourceItem::GotRequest(mut queue, request) => {
                 let mut current_state = &mut self.status;
                 match *current_state {
+                    // all good, handling messages
                     LoopStatus::Connected => {
                         use super::ClientRequestType::*;
 
+                        // the request we send is...
                         match request {
+                            // a normal package
                             Some(ClientRequest {
                                      ret,
                                      ack,
@@ -355,6 +369,7 @@ where
                                 }
                                 // FIXME TODO ?
                             }
+                            // a request to disconnect
                             Some(ClientRequest {
                                      ack,
                                      ret,
@@ -377,16 +392,19 @@ where
                                         LoopStatus::Disconnecting(DisconnectState::Sending, ret);
                                 }
                             }
+                            // any other type of package
                             Some(ClientRequest { ty: _, ret, ack }) => {
                                 let _ = ack.send(Err(ErrorKind::LoopStateError.into()));
                                 return Ok(Async::Ready(()));
                             }
+                            // no request really, unexpected
                             None => {
                                 *current_state =
                                     LoopStatus::PendingError(ErrorKind::LoopCommsError.into());
                             }
                         }
                     }
+                    // an error is pending
                     LoopStatus::PendingError(_) => {
                         let e = match mem::replace(current_state, LoopStatus::Done) {
                             LoopStatus::PendingError(e) => e,
@@ -400,6 +418,7 @@ where
                     _ => unreachable!(),
                 };
             }
+            // XXX ????
             SourceItem::ProcessRequest(ref sent, ref more) => {
                 self.inflight = *more;
                 // Set the timeout flag
@@ -554,21 +573,24 @@ where
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         loop {
+            // loop is done we are ready
             if let LoopStatus::Done = self.status {
                 return Ok(Async::Ready(()));
             }
 
+            // check all the futures in the futures map
             let res = match self.sources.poll() {
                 Ok(Async::NotReady) => return Ok(Async::NotReady),
                 Ok(Async::Ready(r)) => r,
                 Err(e) => {
-                    // Close the connection to the server
+                    // TODO Close the connection to the server
+
                     self.status = LoopStatus::PendingError(e.into());
                     continue;
                 }
             };
             if let Some(sourceitem) = res {
-                self.poll_queues(sourceitem);
+                self.poll_queues(sourceitem)?;
             }
         }
     }
